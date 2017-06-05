@@ -125,17 +125,6 @@ namespace QuickFix
             if (settings.Has(SessionSettings.RESETSEQUENCE_MESSAGE_REQUIRES_ORIGSENDINGTIME))
                 session.RequiresOrigSendingTime = settings.GetBool(SessionSettings.RESETSEQUENCE_MESSAGE_REQUIRES_ORIGSENDINGTIME);
 
-
-			//@AF
-			if (settings.Has(SessionSettings.FIX_USER_ID))
-				session.FixUserId = settings.GetString(SessionSettings.FIX_USER_ID);
-			if (settings.Has (SessionSettings.FIX_PASSWD))
-				session.FixPassword = settings.GetString (SessionSettings.FIX_PASSWD);
-
-			if (settings.Has (SessionSettings.ENABLE_CME_FIX))
-				session.EnableCMEFix = settings.GetBool (SessionSettings.ENABLE_CME_FIX);
-			//@AF
-
             return session;
         }
 

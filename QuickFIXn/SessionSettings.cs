@@ -66,12 +66,6 @@ namespace QuickFix
         public const string CHECK_LATENCY = "CheckLatency";
         public const string MAX_LATENCY = "MaxLatency";
 
-    	public const string FIX_USER_ID = "FixUserId";
-    	public const string FIX_PASSWD = "FixPassword";
-
-
-    	public const string ENABLE_CME_FIX = "EnableCMEFix";
-
 
         public const string SSL_ENABLE = "SSLEnable";
         public const string SSL_SERVERNAME = "SSLServerName";
