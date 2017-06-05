@@ -316,7 +316,17 @@ namespace QuickFix.DataDictionary
 			result = null;
 			return false;
 		}
+		public bool IsDataField (int tag)
+		{
+			if (FieldsByTag.ContainsKey (tag))
+			{
+				DDField fld = FieldsByTag[tag];
+				if (fld.FixFldType != null && fld.FixFldType.Equals("DATA", StringComparison.InvariantCultureIgnoreCase))
+					return true;
+			}
 
+			return false;
+		}
 		/// <summary>
 		/// Check that this tag is defined in the DataDictionary
 		/// </summary>

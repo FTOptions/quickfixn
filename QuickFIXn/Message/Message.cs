@@ -119,7 +119,7 @@ namespace QuickFix
             return new MsgType(GetMsgType(fixstring));
         }
 
-        public static StringField ExtractField(string msgstr, ref int pos, DataDictionary.DataDictionary sessionDD, DataDictionary.DataDictionary appDD)
+        public StringField ExtractField(string msgstr, ref int pos, DataDictionary.DataDictionary sessionDD, DataDictionary.DataDictionary appDD)
         {
             try
             {
@@ -127,18 +127,30 @@ namespace QuickFix
                 int tag = Convert.ToInt32(msgstr.Substring(pos, tagend - pos));
                 pos = tagend + 1;
                 int fieldvalend = msgstr.IndexOf("\u0001", pos);
-                StringField field =  new StringField(tag, msgstr.Substring(pos, fieldvalend - pos));
+            	StringField field = new StringField (tag, msgstr.Substring (pos, fieldvalend - pos));
 
-                /** TODO data dict stuff
-                if (((null != sessionDD) && sessionDD.IsDataField(field.Tag)) || ((null != appDD) && appDD.IsDataField(field.Tag)))
+                if (((null != sessionDD) && sessionDD.IsDataField(tag)) || ((null != appDD) && appDD.IsDataField(tag)))
                 {
                     string fieldLength = "";
                     // Assume length field is 1 less
-                    int lenField = field.Tag - 1;
+                    int lenField = tag - 1;
                     // Special case for Signature which violates above assumption
-                    if (Tags.Signature.Equals(field.Tag))
+                    if (Tags.Signature.Equals(tag))
                         lenField = Tags.SignatureLength;
 
+                	string slen = GetFieldOrDefault(Header, lenField, null);
+					if (slen != null)
+					{
+						slen = slen.Trim();
+						if (slen.Length > 0)
+						{
+							int ilen = Int32.Parse(slen);
+							fieldvalend = pos + ilen;
+							field = new StringField (tag, msgstr.Substring (pos, fieldvalend - pos));
+						}
+					}
+
+                	/**
                     if ((null != group) && group.isSetField(lenField))
                     {
                         fieldLength = group.GetField(lenField);
@@ -149,8 +161,13 @@ namespace QuickFix
                         fieldLength = getField(lenField);
                         soh = equalSign + 1 + atol(fieldLength.c_str());
                     }
+					 */
+
                 }
-                */
+                else
+                {
+					field = new StringField (tag, msgstr.Substring (pos, fieldvalend - pos));
+				}
 
                 pos = fieldvalend + 1;
                 return field;
@@ -169,15 +186,43 @@ namespace QuickFix
             }
         }
 
-        public static StringField ExtractField(string msgstr, ref int pos)
+		public static StringField ExtractField_s (string msgstr, ref int pos, DataDictionary.DataDictionary sessionDD, DataDictionary.DataDictionary appDD)
+		{
+			try
+			{
+				int tagend = msgstr.IndexOf ("=", pos);
+				int tag = Convert.ToInt32 (msgstr.Substring (pos, tagend - pos));
+				pos = tagend + 1;
+				int fieldvalend = msgstr.IndexOf ("\u0001", pos);
+				StringField field = new StringField (tag, msgstr.Substring (pos, fieldvalend - pos));
+
+				pos = fieldvalend + 1;
+				return field;
+			}
+			catch (System.ArgumentOutOfRangeException e)
+			{
+				throw new MessageParseError ("Error at position (" + pos + ") while parsing msg (" + msgstr + ")", e);
+			}
+			catch (System.OverflowException e)
+			{
+				throw new MessageParseError ("Error at position (" + pos + ") while parsing msg (" + msgstr + ")", e);
+			}
+			catch (System.FormatException e)
+			{
+				throw new MessageParseError ("Error at position (" + pos + ") while parsing msg (" + msgstr + ")", e);
+			}
+		}
+
+
+        public  StringField ExtractField(string msgstr, ref int pos)
         {
             return ExtractField(msgstr, ref pos, null, null);
         }
 
-        public static string ExtractBeginString(string msgstr)
+        public  static string ExtractBeginString(string msgstr)
         {
             int i = 0;
-            return ExtractField(msgstr, ref i, null, null).Obj;
+            return ExtractField_s(msgstr, ref i, null, null).Obj;
         }
 
         public static bool IsHeaderField(int tag)
@@ -517,7 +562,7 @@ namespace QuickFix
 
                     // Create a new group!
                     if (msgFactory != null)
-                        grp = msgFactory.Create(Message.ExtractBeginString(msgstr), Message.GetMsgType(msgstr), grpNoFld.Tag);
+                        grp = msgFactory.Create(ExtractBeginString(msgstr), Message.GetMsgType(msgstr), grpNoFld.Tag);
 
                     //If above failed (shouldn't ever happen), just use a generic Group.
                     if (grp == null)

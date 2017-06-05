@@ -206,6 +206,10 @@ namespace QuickFix
         /// </summary>
         public bool RequiresOrigSendingTime { get; set; }
 
+		public bool EnableCMEFix { get; set; }
+		public string FixUserId { get; set; }
+		public string FixPassword { get; set; }
+
         #endregion
 
         public Session(
@@ -830,7 +834,7 @@ namespace QuickFix
             }
             catch (System.Exception e)
             {
-                this.Log.OnEvent("ERROR during resend request " + e.Message);
+                this.Log.OnEvent("ERROR during resend request " + e.Message + "\n" + e.StackTrace);
             }
         }
         private bool ResendApproved(Message msg, SessionID sessionID)
@@ -882,7 +886,13 @@ namespace QuickFix
 
         protected void NextSequenceReset(Message sequenceReset)
         {
-            bool isGapFill = false;
+
+        	string beginString = sequenceReset.Header.GetField(Fields.Tags.BeginString);
+
+			int msgSeqNo = sequenceReset.Header.GetInt (Fields.Tags.MsgSeqNum);
+			//this.Log.OnEvent ("1:Received SequenceReset FROM: " + state_.GetNextTargetMsgSeqNum () + " TO: " + msgSeqNo);
+
+			bool isGapFill = false;
             if (sequenceReset.IsSetField(Fields.Tags.GapFillFlag))
                 isGapFill = sequenceReset.GetBoolean(Fields.Tags.GapFillFlag);
 
@@ -892,18 +902,50 @@ namespace QuickFix
             if (sequenceReset.IsSetField(Fields.Tags.NewSeqNo))
             {
                 int newSeqNo = sequenceReset.GetInt(Fields.Tags.NewSeqNo);
+            	int saveNewSeqNo = newSeqNo;
+            	int gap = 0;
+
+				//@AF - Start
+				if (this.EnableCMEFix)
+				{
+					ResendRange range = state_.GetResendRange();
+					if (range.ChunkEndSeqNo > 0 && newSeqNo > range.ChunkEndSeqNo)
+					{
+						//New Gap is newSqNo - range.ChunkEndSeqNo
+						gap = newSeqNo - range.ChunkEndSeqNo;
+
+						this.Log.OnEvent("Adjusted SequenceReset FROM: " + state_.GetNextTargetMsgSeqNum()
+						                 + " TO: " + newSeqNo
+						                 + " ChunkEndSeqNo: " + range.ChunkEndSeqNo);
+						newSeqNo = range.ChunkEndSeqNo + 1;
+						state_.SetResendRange(0, 0);
+					}
+				}
+            	//@AF - End
+
                 this.Log.OnEvent("Received SequenceReset FROM: " + state_.GetNextTargetMsgSeqNum() + " TO: " + newSeqNo);
 
                 if (newSeqNo > state_.GetNextTargetMsgSeqNum())
                 {
                     state_.SetNextTargetMsgSeqNum(newSeqNo);
-                }
+					//this.Log.OnEvent ("SequenceReset NextTargetSeqNum: " + state_.GetNextTargetMsgSeqNum ());
+				}
                 else
                 {
                     if (newSeqNo < state_.GetNextTargetMsgSeqNum())
                         GenerateReject(sequenceReset, FixValues.SessionRejectReason.VALUE_IS_INCORRECT);
                 }
-            }
+
+				//@AF - Start
+				if (EnableCMEFix)
+				{
+					if (gap > 0)
+					{
+						DoTargetTooHigh(beginString, saveNewSeqNo);
+					}
+				}
+            	//@AF - End
+			}
         }
 
         public bool Verify(Message message)
@@ -1063,7 +1105,10 @@ namespace QuickFix
 
         protected bool IsTargetTooHigh(int msgSeqNum)
         {
-            return msgSeqNum > state_.GetNextTargetMsgSeqNum();
+
+			bool isTooHigh = msgSeqNum > state_.GetNextTargetMsgSeqNum ();
+			//this.Log.OnEvent ("Is target too high? Target = " + state_.GetNextTargetMsgSeqNum () + " but received " + msgSeqNum + " : " + isTooHigh);
+        	return isTooHigh;
         }
 
         protected bool IsTargetTooLow(int msgSeqNum)
@@ -1074,8 +1119,9 @@ namespace QuickFix
         protected void DoTargetTooHigh(Message msg, int msgSeqNum)
         {
             string beginString = msg.Header.GetField(Fields.Tags.BeginString);
+        	string msgType = msg.Header.GetField(Fields.Tags.MsgType);
 
-            this.Log.OnEvent("MsgSeqNum too high, expecting " + state_.GetNextTargetMsgSeqNum() + " but received " + msgSeqNum);
+            this.Log.OnEvent(msgType + ":MsgSeqNum too high, expecting " + state_.GetNextTargetMsgSeqNum() + " but received " + msgSeqNum);
             state_.Queue(msgSeqNum, msg);
 
             if (state_.ResendRequested())
@@ -1092,7 +1138,40 @@ namespace QuickFix
             GenerateResendRequest(beginString, msgSeqNum);
         }
 
-        protected void DoTargetTooLow(Message msg, int msgSeqNum)
+		//@AF - Start
+		protected void DoTargetTooHigh (string beginString, int msgSeqNum)
+		{
+			int expecting = state_.GetNextTargetMsgSeqNum();
+
+			if (msgSeqNum > expecting)
+			{
+				this.Log.OnEvent("MsgSeqNum too high, expecting " + expecting + " but received " + msgSeqNum);
+
+				if (state_.ResendRequested())
+				{
+					ResendRange range = state_.GetResendRange();
+
+					if (!this.SendRedundantResendRequests && msgSeqNum >= range.BeginSeqNo)
+					{
+						this.Log.OnEvent("Already sent ResendRequest FROM: " + range.BeginSeqNo + " TO: " + range.EndSeqNo +
+						                 ".  Not sending another.");
+						return;
+					}
+				}
+
+				GenerateResendRequest(beginString, msgSeqNum);
+			}
+			else if (msgSeqNum == expecting)
+			{
+				ResendRange range = state_.GetResendRange ();
+				state_.SetResendRange(0,0);
+			}
+		}
+		//@AF - End
+
+
+
+		protected void DoTargetTooLow (Message msg, int msgSeqNum)
         {
             bool possDupFlag = false;
             if (msg.Header.IsSetField(Fields.Tags.PossDupFlag))
@@ -1579,7 +1658,8 @@ namespace QuickFix
                 Log.OnEvent("Processing queued message: " + num);
 
                 string msgType = msg.Header.GetString(Tags.MsgType);
-                if (msgType.Equals(MsgType.LOGON) || msgType.Equals(MsgType.RESEND_REQUEST))
+
+				if (msgType.Equals (MsgType.LOGON) || msgType.Equals (MsgType.RESEND_REQUEST) )
                 {
                     state_.IncrNextTargetMsgSeqNum();
                 }
